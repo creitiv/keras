@@ -12,10 +12,13 @@ import numpy as np
 import time
 import json
 import warnings
+import signal
+import operator
 
 from collections import deque
 from collections import OrderedDict
 from collections import Iterable
+from functools import reduce
 from .utils.generic_utils import Progbar
 from . import backend as K
 from .engine.topology import Layer
@@ -1073,6 +1076,41 @@ class CSVLogger(Callback):
     def on_train_end(self, logs=None):
         self.csv_file.close()
         self.writer = None
+
+
+class InterruptTrainingCallback(Callback):
+    """Callback that stops training when one of the given signals is caught.
+
+    # Arguments
+        check_on_batch_end: whether to check if training should be stopped after every batch.
+        check_on_epoch_end: whether to check if training should be stopped after every epoch.
+        signals: a list of signals from the `signal` module.
+    """
+    def __init__(self,
+                 check_on_batch_end=True,
+                 check_on_epoch_end=True,
+                 signals=[signal.SIGINT]):
+        self.check_on_batch_end = check_on_batch_end
+        self.check_on_epoch_end = check_on_epoch_end
+        self.signals = signals
+        self.stop = False
+
+        if not signals:
+            raise ValueError('signals argument must be a list of signals')
+        
+        signal_sum = reduce(operator.or_, signals)
+        signal.signal(signal_sum, self.signal_handler)
+    
+    def signal_handler(self, signal, frame):
+        self.stop = True
+
+    def on_batch_end(self, batch, logs={}):
+        if self.check_on_batch_end and self.stop:
+            self.model.stop_training = True
+
+    def on_epoch_end(self, epoch, logs={}):
+        if self.check_on_epoch_end and self.stop:
+            self.model.stop_training = True
 
 
 class LambdaCallback(Callback):
